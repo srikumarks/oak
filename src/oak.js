@@ -35,6 +35,15 @@ for simple button configurations like this -
 
 tag('button', { onclick: function (e) { alert('Clicked!'); } }, "Click me!");
 
+## v3
+
+Thus far, we're forced to deal with the 'style' attribute just like any
+other. This is not very convenient as we suddenly have to switch to CSS
+notation to specify this one parameter. Let's fix that so that we can now
+do this -
+
+tag('a', { href: '/somewhere', style: { background: 'red' } }, "Click me!");
+
 */
 var tag = function tag(name, attrs) {
     var e = document.createElement(name);
@@ -46,7 +55,13 @@ var tag = function tag(name, attrs) {
             if (/^on/.test(k)) {
                 e.addEventListener(k, attrs[k]);
             } else {
-                e.setAttribute(k, attrs[k]);
+                switch (k) {
+                    case 'style': 
+                        processStyle(attrs[k], e);
+                        break;
+                    default:
+                        e.setAttribute(k, attrs[k]);
+                }
             }
         }
     }
@@ -59,6 +74,12 @@ var tag = function tag(name, attrs) {
         }
     }
     return e;
+};
+
+var processStyle = function processStyle(style, e) {
+    for (var styleAttr in style) {
+        e.style[styleAttr] = style[styleAttr];
+    }
 };
 
 mod.tag = tag;
