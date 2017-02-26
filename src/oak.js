@@ -1,4 +1,7 @@
-var mod = module.exports;
+
+module.exports = function (document, requestAnimationFrame) {
+
+var mod = {};
 
 /**
 
@@ -71,9 +74,10 @@ the case with the plain functional model.
 
 tag('div', { classList: { button: true, large: true },
              model: { urgent: true },
-      function (model) {
-        return model.urgent ? "Click me now!" : "Click me!";
-      });
+           },
+           function (model) {
+              return model.urgent ? "Click me now!" : "Click me!";
+           });
 
 ## v6
 
@@ -119,7 +123,7 @@ So in this version, we give the $oak$render function three methods -
 `.render(parentNode, model, isPure)`, `.update(model, isPure)`
 and `.refresh(model, isPure)`. The difference between `.update` and
 `.refresh` is that the former updates elements in-place whereas the
-latter re-render the whole dom tree.
+latter re-renders the whole dom tree.
 
 ## v9
 
@@ -150,7 +154,7 @@ For our purposes, we can pretend that such a dispatch occus via a
 function (message, arguments...) {} kind of function. So an event handler
 can be created like this - 
 
-    onclick: function (event) { cmd("IncrementCounter", 1); }
+onclick: function (event) { cmd("IncrementCounter", 1); }
 
 The only thing we propose as part of this protocol is that the first argument
 be a string identifying the command. The arguments to be command can be 
@@ -158,12 +162,17 @@ derived from the event. In order to make this simpler, we introduce a
 "handler" function which creates such handlers given a cmd and an instruction string.
 
 function make(cmd) {
-    return tag("div", 
-                { style: { fontFamily: "sans-serif",
-                           fontSize: "24pt" } },
-                tag("div", {}, function (model) { return model.msg; }),
-                tag("button", { onclick: handler(cmd, "clicked") }, "Click me!"));
+return tag("div", 
+{ style: { fontFamily: "sans-serif",
+fontSize: "24pt" } },
+tag("div", {}, function (model) { return model.msg; }),
+tag("button", { onclick: handler(cmd, "clicked") }, "Click me!"));
 }
+
+## v12
+
+We now lift out the dependency on "document" so that we can supply other
+implementations of the DOM for, say, server-side rendering.
 
 */
 var tag = function tag(name, attrs) {
@@ -254,14 +263,14 @@ var tag = function tag(name, attrs) {
         // Install the element updater method into the element itself
         // so that it can be called as e.update(model,isPure).
         e.update = update; 
-            
+
         return e;
     }
 
     $oak$render.update = oakUpdate;
     $oak$render.render = oakRender;
     $oak$render.refresh = oakRefresh;
-    
+
     return $oak$render;
 };
 
@@ -285,10 +294,10 @@ var installContents = function installContents(contents, e) {
     var contentsType = typeof contents;
     if (contentsType === 'function') {
         var child = contents(e.model) || placeholder();
-            // If we're going to do in-place updates, then we're
-            // doing to need a placeholder element which we can 
-            // replace with whetever we need. Without this, in-place
-            // update will not be possible.
+        // If we're going to do in-place updates, then we're
+        // doing to need a placeholder element which we can 
+        // replace with whetever we need. Without this, in-place
+        // update will not be possible.
         if (typeof child === 'string') {
             child = document.createTextNode(child);
         }
@@ -319,34 +328,46 @@ var installContents = function installContents(contents, e) {
 
 var dynattr = function dynattr(fn, k) {
     return function (e) {
-        var val = fn(e.model, k);
-        if (val) {
-            e.setAttribute(k, val.toString());
-        } else {
-            e.removeAttribute(k);
+        if (fn.model !== e.model) {
+            var val = fn(e.model, k);
+            if (val) {
+                e.setAttribute(k, val.toString());
+            } else {
+                e.removeAttribute(k);
+            }
+            fn.model = e.model;
         }
     };
 };
 
 var dynstyle = function dynstyle(fn, attr) {
     return function (e) {
-        e.style[attr] = fn(e.model);
+        if (fn.model !== e.model) {
+            e.style[attr] = fn(e.model);
+            fn.model = e.model;
+        }
     };
 };
 
 var dynclasslist = function dynclasslist(fn, attr) {
     return function (e) {
-        if (fn(e.model)) {
-            e.classList.add(attr);
-        } else {
-            e.classList.remove(attr);
+        if (fn.model !== e.model) {
+            if (fn(e.model)) {
+                e.classList.add(attr);
+            } else {
+                e.classList.remove(attr);
+            }
+            fn.model = e.model;
         }
     };
 };
 
 var dynmodel = function dynmodel(fn) {
     return function (e) {
-        e.model = fn(e.model);
+        if (fn.model !== e.model) {
+            e.model = fn(e.model);
+            fn.model = e.model;
+        }
     };
 };
 
@@ -398,7 +419,7 @@ var update = function update(model, isPure) {
 var oakUpdate = function oakUpdate(model, isPure) {
     // This is expected to be installed as a method of an
     // $oak$render function.
-    return this.element.update(model || this.model, isPure);
+    return debouncedRender(this._parentNode, this, model || this.model, isPure);
 };
 
 var oakRender = function oakRender(parentNode, model, isPure) {
@@ -415,12 +436,12 @@ var debouncedRender = function debouncedRender(parentNode, view, model, isPure) 
 
     // By scheduling to render upon requestAnimationFrame calls,
     // we avoid rendering things that don't need to be displayed,
-    // while maintaining an updated model in view.model. So that
+    // while maintaining an updated model in thing.model. So that
     // when the time comes, we render based on the most recent model.
     view._scheduled = requestAnimationFrame(function () {
         // Mark the scheduled run as done.
         view._scheduled = null;
-        
+
         if (!view.element && view._parentNode) {
             // Not yet mounted.
 
@@ -429,7 +450,7 @@ var debouncedRender = function debouncedRender(parentNode, view, model, isPure) 
 
             e.appendChild(view(view.model));
         } else {
-            view.update(view.model, view._isPure);
+            view.element.update(view.model, view._isPure);
         }
     });
 
@@ -446,22 +467,30 @@ var debouncedRefresh = function debouncedRefresh(content, model, isPure) {
     return debouncedRender(null, content, model, isPure);
 };
 
-// Wrap a function (model) with appropriate protocols
+// Wrap a function (attrs,...) with appropriate protocols
 // that we're using within our `tag`.
 var bless = function bless(component) {
-    function $oak$render(model) {
-        var e = component(model);
-        $oak$render.element = e;
-        e.dyno = [];
-        e.update = update;
-        return e;
+
+    function tag(attrs) {
+
+        var renderer = component.apply(this, arguments);
+
+        function $oak$render(model) {
+            var e = renderer(model);
+            $oak$render.element = e;
+            e.dyno = e.dyno || [];
+            e.update = e.update || update;
+            return e;
+        }
+
+        $oak$render.render = oakRender;
+        $oak$render.refresh = oakRefresh;
+        $oak$render.update = oakUpdate;
+
+        return $oak$render;
     }
 
-    $oak$render.render = oakRender;
-    $oak$render.refresh = oakRefresh;
-    $oak$render.update = oakUpdate;
-
-    return $oak$render;
+    return tag;
 };
 
 // A "keyed list" is simply a triplet combining a data generating
@@ -615,3 +644,6 @@ mod.keyedList = keyedList;
 mod.handler = handler;
 mod.field = field;
 
+return mod;
+
+};
