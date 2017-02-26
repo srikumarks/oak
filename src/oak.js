@@ -44,6 +44,15 @@ do this -
 
 tag('a', { href: '/somewhere', style: { background: 'red' } }, "Click me!");
 
+## v4
+
+In D3, the class list can be specified as an object whose keys are classes
+and whose values are booleans indicating whether you want the classes to
+be included in the 'class' tag attribute or not. This is also convenient
+when called from Javascript. So let's add that too.
+
+tag('div', { classList: { button: true, large: true } }, "Click me!");
+
 */
 var tag = function tag(name, attrs) {
     var e = document.createElement(name);
@@ -58,6 +67,9 @@ var tag = function tag(name, attrs) {
                 switch (k) {
                     case 'style': 
                         processStyle(attrs[k], e);
+                        break;
+                    case 'classList':
+                        processClassList(attrs[k], e);
                         break;
                     default:
                         e.setAttribute(k, attrs[k]);
@@ -79,6 +91,16 @@ var tag = function tag(name, attrs) {
 var processStyle = function processStyle(style, e) {
     for (var styleAttr in style) {
         e.style[styleAttr] = style[styleAttr];
+    }
+};
+
+var processClassList = function processClassList(classList, e) {
+    for (var klass in classList) {
+        if (classList[klass]) {
+            e.classList.add(klass);
+        } else {
+            e.classList.remove(klass);
+        }
     }
 };
 
