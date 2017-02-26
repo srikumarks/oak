@@ -82,13 +82,44 @@ If we now have a function that is called to dynamically return a child,
 then it would be useful to also be able to dynamically return an array
 of children to be inserted at the appropriate point.
 
+## v7
+
+This is getting sweeter, but we now have to deal with the elephant in
+the room for larger DOM structures - that we have to recreate all of it
+from scratch every time something changes in the model. The question now
+is whether we can retain the "functional" simplicity of what we have so far
+while we incorporate a bit of efficiency there.
+
+One thing to observe with what we have so far is that we have the
+ability to lazily create children when we need them. We can exploit this
+and take the laziness to a different level by lazily creating the entire
+structure on demand via a "render" function. Then by keeping track of
+what needs to be updated when interactions happen, we can selectively
+update only those parts of the DOM tree.
+
+What I mean is that instead of returning a fully constructed node, we
+can return a "render" function which when called with the model will
+update the DOM node in-place, creating the necessary structures.
+
+To keep track of things that need to be edited upon certain changes to
+the model, we introduce a new property of a DOM element called 'dyno' - 
+which is an array of functions to call to update the DOM tree. As we
+render the first DOM, we keep track of these "dynos" and use them to
+update in-place whenever the model changes.
+
 */
 var tag = function tag(name, attrs) {
 
     function $oak$render(model) {
         var e = document.createElement(name);
-        e.model = model
-        e.dyno = []; // Holds the list of things to be dynamically updated in-place.
+        e.model = model;
+
+        // We introduce a new property of an element - the 'dyno' -
+        // to hold the list of dynamic calculations and updates to be
+        // done when the model changes. Each entry in the `dyno` array
+        // is of the form `function (element) {}`. Within the dyno
+        // updater, we can access the current model using `element.model`.
+        e.dyno = [];
 
         // Store away the element as a render function property
         // so that it can be modified in-place.
@@ -159,9 +190,13 @@ var tag = function tag(name, attrs) {
         }
 
         for (var i = 2; i < arguments.length; ++i) {
-            installContents(contents, e);
+            installContents(arguments[i], e);
         }
 
+        // Install the element updater method into the element itself
+        // so that it can be called as e.update(model,isPure).
+        e.update = update; 
+            
         return e;
     }
 
@@ -187,30 +222,38 @@ var processClassList = function processClassList(classList, e) {
 var installContents = function installContents(contents, e) {
     var contentsType = typeof contents;
     if (contentsType === 'function') {
-        var child = contents(e.model);
+        var child = contents(e.model) || placeholder();
+            // If we're going to do in-place updates, then we're
+            // doing to need a placeholder element which we can 
+            // replace with whetever we need. Without this, in-place
+            // update will not be possible.
         if (typeof child === 'string') {
             child = document.createTextNode(child);
-        } else if (child instanceof Array) {
-            for (var i = 0; i < child.length; ++i) {
-                installContents(child[i], e);
-            }
+        }
+        e.appendChild(child);
+
+        // If the given function happens to be one of our render
+        // functions, then we need to setup dynamic update for that
+        // too. Otherwise we need to setup an element replacement.
+        if (contents.name === '$oak$render') {
+            e.dyno.push(updater(contents));
         } else {
-            e.appendChild(child);
+            e.dyno.push(replacer(contents, child));
         }
     } else if (contentsType === 'string') {
         e.appendChild(document.createTextNode(contents));
-    } else if (contents instanceof Array) {
-        // We support array type so it is easy to splice lists of
-        // DOM nodes when rendering.
-        for (var i = 0; i < contents.length; ++i) {
-            installContents(contents[i], e);
-        }
     } else if (contents) {
         e.appendChild(contents);
+
+        // If contents is itself a dynamic element, then we need
+        // to be prepared to update it dynamically too.
+        if (contents.dyno) {
+            e.dyno.push(updater(contents));
+        }
     }
 };
 
-function dynattr(fn, k) {
+var dynattr = function dynattr(fn, k) {
     return function (e) {
         var val = fn(e.model, k);
         if (val) {
@@ -219,15 +262,15 @@ function dynattr(fn, k) {
             e.removeAttribute(k);
         }
     };
-}
+};
 
-function dynstyle(fn, attr) {
+var dynstyle = function dynstyle(fn, attr) {
     return function (e) {
         e.style[attr] = fn(e.model);
     };
-}
+};
 
-function dynclasslist(fn, attr) {
+var dynclasslist = function dynclasslist(fn, attr) {
     return function (e) {
         if (fn(e.model)) {
             e.classList.add(attr);
@@ -235,12 +278,58 @@ function dynclasslist(fn, attr) {
             e.classList.remove(attr);
         }
     };
-}
+};
 
-function dynmodel(fn) {
+var dynmodel = function dynmodel(fn) {
     return function (e) {
         e.model = fn(e.model);
     };
-}
+};
+
+var placeholder = function placeholder() {
+    var div = document.createElement('div');
+    div.style.display = 'none';
+    return div;
+};
+
+var replacer = function replacer(fn, child) {
+    return function (e) {
+        var newChild = fn(e.model) || placeholder();
+        if (typeof newChild === 'string') {
+            newChild = mod.dom.createTextNode(newChild);
+        }
+        e.replaceChild(newChild, child);
+        child = newChild;
+    };
+};
+
+var updater = function updater(node) {
+    return function (e, isPure) {
+        // Why would we pass the e's model? This is because the
+        // node is its child and might have setup a "dynamic model"
+        // function when specifying its attributes. In that case,
+        // what happens here is that in the dynamic update cycle,
+        // the dynmodel will end up setting the part of the model
+        // that is relevant to the child. If it hasn't setup such
+        // a dynamic model, then it needs to use the parent's new
+        // model anyway.
+        node.update(e.model, isPure);
+    };
+};
+
+var update = function update(model, isPure) {
+    // 'this' is the element - i.e. the update function
+    // is expected to be installed into the element.
+    if (isPure && this.model === model) {
+        return;
+    }
+    this.model = model || this.model;
+    if (this.dyno) {
+        for (var i = 0; i < this.dyno.length; ++i) {
+            this.dyno[i](this, isPure);
+        }
+    }
+};
+
 
 mod.tag = tag;
