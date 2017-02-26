@@ -130,6 +130,15 @@ this we introduce a "bless" function that takes any function (model) {}
 and turns it into a "component" by wrapping it in a function that satisfies
 all our needs for it to look like a component.
 
+## v10
+
+We can now render and update components. However, we can't yet efficiently
+update whole swathes of child components as we need to traverse or
+re-create big lists. Towards this, we create a new type of sub-component
+called "KeyedList" that we also support towards this.
+
+We expose the keyedList constructor out of the module.
+
 */
 var tag = function tag(name, attrs) {
 
@@ -269,6 +278,8 @@ var installContents = function installContents(contents, e) {
         }
     } else if (contentsType === 'string') {
         e.appendChild(document.createTextNode(contents));
+    } else if (isKeyedList(contents)) {
+        installKeyedList(contents, e);
     } else if (contents) {
         e.appendChild(contents);
 
@@ -427,6 +438,138 @@ var bless = function bless(component) {
     return $oak$render;
 };
 
+// A "keyed list" is simply a triplet combining a data generating
+// function, a mapper and a key extraction function with the following
+// signatures -
+//
+// dataFn = function (model) { return array; }
+//          :: model -> [datum]
+// mapper = function (datum, key, selection) { return element; }
+//          :: (this = element) -> datum -> String or Number -> String -> element
+// keyFn = function (datum) { return stringKey; }
+//          :: datum -> String or Number
+//
+// If you leave the keyFn out, it will be assumed to be the index
+// of an array. In that case we kick into a special function to handle array
+// data. Otherwise we treat it as an object whose keys may change.
+var KeyedList = function KeyedList(dataFn, mapper, keyFn) {
+    this.data = dataFn;
+    this.map = mapper;
+    this.key = keyFn || indexKeyFn;
+};
+
+var isKeyedList = function isKeyedList(contents) {
+    return (contents instanceof KeyedList);
+};
+
+var indexKeyFn = function indexKeyFn(d, i) {
+    return i;
+};
+
+var keyedList = function keyedList(dataFn, mapper, keyFn) {
+    return new KeyedList(dataFn, mapper, keyFn);
+};
+
+var installKeyedList = function installKeyedList(spec, e) {
+    var install = spec.key === indexKeyFn ? installIndexKeyedList : installObjectKeyedList;
+    install(spec, e);
+};
+
+var installIndexKeyedList = function installIndexKeyedList(spec, e) {
+    var data = new Array(0), elements = new Array(0);
+    var enterSel = new Array(0), updateSel = new Array(0), exitSel = new Array(0);
+
+    function update(e, isPure) {
+        var newData = spec.data(e.model);
+        var nk, k, j, ks;
+
+        // Determine selections
+        for (nk in newData) {
+            if (keys[nk]) {
+                updateSel[nk] = true;
+            } else {
+                enterSel[nk] = true;
+            }
+        }
+
+        for (k in data) {
+            if (!updateSel[k] && !enterSel[k]) {
+                // In exitSel.
+                spec.map.call(elements[k], data[k], k, "exit");
+                delete elements[k];
+            }
+        }
+
+        for (nk in newData) {
+            if (enterSel[nk]) {
+                elements[nk] = spec.map.call(e, newData[nk], nk, "enter");
+            } else if (updateSel[nk] && (isPure ? elements[nk].model !== data[nk] : true)) {
+                elements[nk].update(data[nk], isPure);
+            }
+        }
+
+        for (ks in enterSel) {
+            updateSel[ks] = ks;
+            delete enterSel[ks];
+        }
+
+        data = newData;
+    }
+
+    update(e, false);
+
+    e.dyno.push(update);
+};
+
+var installObjectKeyedList = function installObjectKeyedList(spec, e) {
+    var data = {}, keys = {}, elements = {};
+    var enterSel = {}, updateSel = {};
+
+    function update(e, isPure) {
+        var newData = spec.data(e.model);
+        var newKeys = newData.map(spec.key);
+
+        // Determine selections
+        for (var i = 0; i < newKeys.length; ++i) {
+            if (keys[newKeys[i]]) {
+                updateSel[newKeys[i]] = true;
+            } else {
+                enterSel[newKeys[i]] = true;
+            }
+        }
+
+        for (var k in keys) {
+            if (!updateSel[k] && !enterSel[k]) {
+                // In exitSel.
+                spec.map.call(elements[k], data[k], k, "exit");
+                delete elements[k];
+            }
+        }
+
+        for (var j = 0; j < newKeys.length; ++j) {
+            var nk = newKeys[j];
+            if (enterSel[nk]) {
+                elements[nk] = spec.map.call(e, newData[nk], nk, "enter");
+            } else if (updateSel[nk] && (isPure ? elements[nk].model !== data[nk] : true)) {
+                elements[nk].update(data[nk], isPure);
+            }
+        }
+
+        for (var ks in enterSel) {
+            updateSel[ks] = ks;
+            delete enterSel[ks];
+        }
+
+        data = newData;
+        keys = newKeys;
+    }
+
+    update(e, false);
+
+    e.dyno.push(update);
+};
+
 mod.tag = tag;
 mod.bless = bless;
+mod.keyedList = keyedList;
 
