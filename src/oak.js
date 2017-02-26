@@ -121,6 +121,15 @@ and `.refresh(model, isPure)`. The difference between `.update` and
 `.refresh` is that the former updates elements in-place whereas the
 latter re-render the whole dom tree.
 
+## v9
+
+We kind of have a component model now, where we can create a component,
+render it to a DOM parent node and subsequently have it update whenever
+a "model" changes. But we can't yet build our own components. Towards
+this we introduce a "bless" function that takes any function (model) {}
+and turns it into a "component" by wrapping it in a function that satisfies
+all our needs for it to look like a component.
+
 */
 var tag = function tag(name, attrs) {
 
@@ -400,5 +409,24 @@ var debouncedRefresh = function debouncedRefresh(content, model, isPure) {
     return debouncedRender(null, content, model, isPure);
 };
 
+// Wrap a function (model) with appropriate protocols
+// that we're using within our `tag`.
+var bless = function bless(component) {
+    function $oak$render(model) {
+        var e = component(model);
+        $oak$render.element = e;
+        e.dyno = [];
+        e.update = update;
+        return e;
+    }
+
+    $oak$render.render = oakRender;
+    $oak$render.refresh = oakRefresh;
+    $oak$render.update = oakUpdate;
+
+    return $oak$render;
+};
+
 mod.tag = tag;
+mod.bless = bless;
 
