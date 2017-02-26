@@ -120,8 +120,8 @@ render function that can be called to mount the tree into an existing
 parent node, so that the child nodes can be kept updated in-place.
 
 So in this version, we give the $oak$render function three methods -
-`.render(parentNode, model, isPure)`, `.update(model, isPure)`
-and `.refresh(model, isPure)`. The difference between `.update` and
+`.render(parentNode, model)`, `.update(model)`
+and `.refresh(model)`. The difference between `.update` and
 `.refresh` is that the former updates elements in-place whereas the
 latter re-renders the whole dom tree.
 
@@ -173,6 +173,10 @@ tag("button", { onclick: handler(cmd, "clicked") }, "Click me!"));
 
 We now lift out the dependency on "document" so that we can supply other
 implementations of the DOM for, say, server-side rendering.
+
+## v13
+
+Some utilities for managing command actions expressed as an object.
 
 */
 var tag = function tag(name, attrs) {
@@ -261,7 +265,7 @@ var tag = function tag(name, attrs) {
         }
 
         // Install the element updater method into the element itself
-        // so that it can be called as e.update(model,isPure).
+        // so that it can be called as e.update(model).
         e.update = update; 
 
         return e;
@@ -389,7 +393,7 @@ var replacer = function replacer(fn, child) {
 };
 
 var updater = function updater(node) {
-    return function (e, isPure) {
+    return function (e) {
         // Why would we pass the e's model? This is because the
         // node is its child and might have setup a "dynamic model"
         // function when specifying its attributes. In that case,
@@ -398,37 +402,36 @@ var updater = function updater(node) {
         // that is relevant to the child. If it hasn't setup such
         // a dynamic model, then it needs to use the parent's new
         // model anyway.
-        node.update(e.model, isPure);
+        node.update(e.model);
     };
 };
 
-var update = function update(model, isPure) {
+var update = function update(model) {
     // 'this' is the element - i.e. the update function
     // is expected to be installed into the element.
-    if (isPure && this.model === model) {
+    if (this.model === model) {
         return;
     }
     this.model = model || this.model;
     if (this.dyno) {
         for (var i = 0; i < this.dyno.length; ++i) {
-            this.dyno[i](this, isPure);
+            this.dyno[i](this);
         }
     }
 };
 
-var oakUpdate = function oakUpdate(model, isPure) {
+var oakUpdate = function oakUpdate(model) {
     // This is expected to be installed as a method of an
     // $oak$render function.
-    return debouncedRender(this._parentNode, this, model || this.model, isPure);
+    return debouncedRender(this._parentNode, this, model || this.model);
 };
 
-var oakRender = function oakRender(parentNode, model, isPure) {
-    return debouncedRender(parentNode, this, model, isPure);
+var oakRender = function oakRender(parentNode, model) {
+    return debouncedRender(parentNode, this, model);
 };
 
-var debouncedRender = function debouncedRender(parentNode, view, model, isPure) {
+var debouncedRender = function debouncedRender(parentNode, view, model) {
     view.model = model || view.model;
-    view._isPure = isPure;
     view._parentNode = parentNode || view._parentNode;
     if (view._scheduled) {
         return; // We're already scheduled to render.
@@ -450,7 +453,7 @@ var debouncedRender = function debouncedRender(parentNode, view, model, isPure) 
 
             e.appendChild(view(view.model));
         } else {
-            view.element.update(view.model, view._isPure);
+            view.element.update(view.model);
         }
     });
 
@@ -459,12 +462,12 @@ var debouncedRender = function debouncedRender(parentNode, view, model, isPure) 
 
 // A "refresh" is simply a render into the existing parent node.
 // Simple convenience function.
-var oakRefresh = function oakRefresh(model, isPure) {
-    return debouncedRefresh(this, model, isPure);
+var oakRefresh = function oakRefresh(model) {
+    return debouncedRefresh(this, model);
 };
 
-var debouncedRefresh = function debouncedRefresh(content, model, isPure) {
-    return debouncedRender(null, content, model, isPure);
+var debouncedRefresh = function debouncedRefresh(content, model) {
+    return debouncedRender(null, content, model);
 };
 
 // Wrap a function (attrs,...) with appropriate protocols
@@ -530,7 +533,7 @@ var installIndexKeyedList = function installIndexKeyedList(spec, e) {
     var data = new Array(0), elements = new Array(0);
     var enterSel = new Array(0), updateSel = new Array(0), exitSel = new Array(0);
 
-    function update(e, isPure) {
+    function update(e) {
         var newData = spec.data(e.model);
         var nk, k, j, ks;
 
@@ -554,8 +557,8 @@ var installIndexKeyedList = function installIndexKeyedList(spec, e) {
         for (nk in newData) {
             if (enterSel[nk]) {
                 elements[nk] = spec.map.call(e, newData[nk], nk, "enter");
-            } else if (updateSel[nk] && (isPure ? elements[nk].model !== data[nk] : true)) {
-                elements[nk].update(data[nk], isPure);
+            } else if (updateSel[nk] && (elements[nk].model !== data[nk])) {
+                elements[nk].update(data[nk]);
             }
         }
 
@@ -576,7 +579,7 @@ var installObjectKeyedList = function installObjectKeyedList(spec, e) {
     var data = {}, keys = {}, elements = {};
     var enterSel = {}, updateSel = {};
 
-    function update(e, isPure) {
+    function update(e) {
         var newData = spec.data(e.model);
         var newKeys = newData.map(spec.key);
 
@@ -601,8 +604,8 @@ var installObjectKeyedList = function installObjectKeyedList(spec, e) {
             var nk = newKeys[j];
             if (enterSel[nk]) {
                 elements[nk] = spec.map.call(e, newData[nk], nk, "enter");
-            } else if (updateSel[nk] && (isPure ? elements[nk].model !== data[nk] : true)) {
-                elements[nk].update(data[nk], isPure);
+            } else if (updateSel[nk] && (elements[nk].model !== data[nk])) {
+                elements[nk].update(data[nk]);
             }
         }
 
@@ -615,7 +618,7 @@ var installObjectKeyedList = function installObjectKeyedList(spec, e) {
         keys = newKeys;
     }
 
-    update(e, false);
+    update(e);
 
     e.dyno.push(update);
 };
@@ -638,11 +641,80 @@ var field = function field(name) {
     };
 };
 
+// parentNode :: DOMNode
+// viewMaker :: function (model) -> function $oak$render ...
+// model :: TheInitialModel
+// cmd :: Map String ((..) -> model -> ())
+var instantiate = function instantiate(parentNode, viewMaker, model, Cmd) {
+    var _cmd = {};
+    for (var k in Cmd) {
+        _cmd[k] = (function (k, msg) {
+            return function () {
+                var fn = msg.apply(this, arguments);
+                model = fn.call(this, model);
+                view.render(parentNode, model);
+            };
+        }(k, Cmd[k]));
+    }
+    viewMaker(model, _cmd).render(parentNode, model);
+};
+
+// An immutable data structure that works by copying.
+// Feel free to replace this with something more efficient.
+var DS = {};
+
+DS.get = function get(model, path) {
+    for (var i = 0; i < path.length; ++i) {
+        model = model[path[i]];
+    }
+    return model;
+};
+
+DS.set = function set(model, path, value) {
+    for (var i = 0; i+1 < path.length; ++i) {
+        model = modify(model, path[i], copy(model[path[i]]));
+    }
+    if (i < path.length) {
+        return modify(model, path[i], value);
+    }
+    return model;
+};
+
+DS.modify = function modify(model) {
+    var c = copy(model);
+    for (var i = 1; i < arguments.length; i += 2) {
+        var val = c[arguments[i+1]];
+        if (typeof val === 'undefined') {
+            delete c[arguments[i]];
+        } else {
+            c[arguments[i]] = val;
+        }
+    }
+    return c;
+};
+
+DS.copy = function (model) {
+    if (model instanceof Array) {
+        return model.slice(0);
+    } else if (model instanceof Object) {
+        var c = {};
+        for (var k in model) {
+            c[k] = model[k];
+        }
+        return c;
+    } else {
+        return model;
+    }
+};
+
+
 mod.tag = tag;
 mod.bless = bless;
 mod.keyedList = keyedList;
 mod.handler = handler;
 mod.field = field;
+mod.instantiate = instantiate;
+mod.DS = DS;
 
 return mod;
 
