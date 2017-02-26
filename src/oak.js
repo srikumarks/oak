@@ -107,6 +107,20 @@ which is an array of functions to call to update the DOM tree. As we
 render the first DOM, we keep track of these "dynos" and use them to
 update in-place whenever the model changes.
 
+## v8
+
+Now, elements know how to update themselves once rendered, but we're
+missing the kickstarter. As it stands, we can only call the `$oak$render`
+function to create the DOM tree from scratch. It'll be nice to have a
+render function that can be called to mount the tree into an existing
+parent node, so that the child nodes can be kept updated in-place.
+
+So in this version, we give the $oak$render function three methods -
+`.render(parentNode, model, isPure)`, `.update(model, isPure)`
+and `.refresh(model, isPure)`. The difference between `.update` and
+`.refresh` is that the former updates elements in-place whereas the
+latter re-render the whole dom tree.
+
 */
 var tag = function tag(name, attrs) {
 
@@ -200,6 +214,10 @@ var tag = function tag(name, attrs) {
         return e;
     }
 
+    $oak$render.update = oakUpdate;
+    $oak$render.render = oakRender;
+    $oak$render.refresh = oakRefresh;
+    
     return $oak$render;
 };
 
@@ -331,5 +349,56 @@ var update = function update(model, isPure) {
     }
 };
 
+var oakUpdate = function oakUpdate(model, isPure) {
+    // This is expected to be installed as a method of an
+    // $oak$render function.
+    return this.element.update(model || this.model, isPure);
+};
+
+var oakRender = function oakRender(parentNode, model, isPure) {
+    return debouncedRender(parentNode, this, model, isPure);
+};
+
+var debouncedRender = function debouncedRender(parentNode, view, model, isPure) {
+    view.model = model || view.model;
+    view._isPure = isPure;
+    view._parentNode = parentNode || view._parentNode;
+    if (view._scheduled) {
+        return; // We're already scheduled to render.
+    }
+
+    // By scheduling to render upon requestAnimationFrame calls,
+    // we avoid rendering things that don't need to be displayed,
+    // while maintaining an updated model in view.model. So that
+    // when the time comes, we render based on the most recent model.
+    view._scheduled = requestAnimationFrame(function () {
+        // Mark the scheduled run as done.
+        view._scheduled = null;
+        
+        if (!view.element && view._parentNode) {
+            // Not yet mounted.
+
+            // Support specifying a parent node by element id as well.
+            var e = typeof view._parentNode === 'string' ? document.getElementById(view._parentNode) : view._parentNode;
+
+            e.appendChild(view(view.model));
+        } else {
+            view.update(view.model, view._isPure);
+        }
+    });
+
+    return view;
+};
+
+// A "refresh" is simply a render into the existing parent node.
+// Simple convenience function.
+var oakRefresh = function oakRefresh(model, isPure) {
+    return debouncedRefresh(this, model, isPure);
+};
+
+var debouncedRefresh = function debouncedRefresh(content, model, isPure) {
+    return debouncedRender(null, content, model, isPure);
+};
 
 mod.tag = tag;
+
