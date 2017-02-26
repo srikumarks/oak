@@ -2,6 +2,8 @@ var mod = module.exports;
 
 /**
 
+## v1
+
 All we want is a single function that is somewhat isomorphic to
 a HTML tag so that we can construct arbitrary DOM trees programmatically
 in Javascript. This will be the beginning of our "framework". There is
@@ -24,16 +26,37 @@ the nested nature of the DOM nodes. Once you construct the DOM node, the final
 remaining step is to insert it into the DOM. This we'll keep aside as the 
 trivial part of it.
 
+## v2
+
+We want a bit more convenience out of this simple utility. For example,
+it'll be nice to be able to set handlers in the attributes objects by
+automatically detecting 'onclick', 'onblur' kinds of names. This makes
+for simple button configurations like this -
+
+tag('button', { onclick: function (e) { alert('Clicked!'); } }, "Click me!");
+
 */
 var tag = function tag(name, attrs) {
     var e = document.createElement(name);
     if (attrs) {
         for (var k in attrs) {
-            e.setAttribute(k, attrs[k]);
+            // If an attribute key is of the form onclick/onblur/onmouseup/etc.
+            // then we treat the value as a handler to be attached 
+            // to the element.
+            if (/^on/.test(k)) {
+                e.addEventListener(k, attrs[k]);
+            } else {
+                e.setAttribute(k, attrs[k]);
+            }
         }
     }
     for (var i = 2; i < arguments.length; ++i) {
-        e.appendChild(arguments[i]);
+        // We support plain strings. Just turn them into text nodes.
+        if (typeof arguments[i] === 'string') {
+            e.appendChild(document.createTextNode(arguments[i]));
+        } else {
+            e.appendChild(arguments[i]);
+        }
     }
     return e;
 };
