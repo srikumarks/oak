@@ -53,38 +53,85 @@ when called from Javascript. So let's add that too.
 
 tag('div', { classList: { button: true, large: true } }, "Click me!");
 
+## v5
+
+Thus far, we have a good function to let us build nested DOM elements.
+We can live with this for small DOM nodes. If we want to reuse pieces
+of these structures, we need more abstraction ability. It is quite
+useful to think of the parts of the DOM tree as derived from a single
+"model" object. The way an attribute or style parameter or class 
+can be computed from such a model is quite simple - just use a
+`function (model) {}` as the value instead of a plain value.
+
+Just as attributes can be made dynamic through function (model),
+child nodes can also be made dynamic using the same mechanism. We
+now do both of these at one shot. The main offshoot of this change is
+that the children can be computed *after* the parent, which wasn't
+the case with the plain functional model.
+
 */
 var tag = function tag(name, attrs) {
     var e = document.createElement(name);
+    
     if (attrs) {
         for (var k in attrs) {
-            // If an attribute key is of the form onclick/onblur/onmouseup/etc.
-            // then we treat the value as a handler to be attached 
-            // to the element.
-            if (/^on/.test(k)) {
-                e.addEventListener(k, attrs[k]);
-            } else {
+            var valOrFn = attrs[k];
+
+            if (typeof valOrFn === 'function') {
                 switch (k) {
-                    case 'style': 
-                        processStyle(attrs[k], e);
+                    case 'model':
+                        // This is a special attribute that we use to attach a
+                        // model object to the node.
+                        e.model = valOrFn(e.model);
+                        break;
+                    case 'style':
+                        processStyle(valOrFn(e.model), e);
                         break;
                     case 'classList':
-                        processClassList(attrs[k], e);
+                        processClassList(valOrFn(e.model), e);
                         break;
                     default:
-                        e.setAttribute(k, attrs[k]);
+                        // If an attribute key is of the form onclick/onmouseup/etc.
+                        // then we treat the value as a handler to be attached 
+                        // to the element. Note that within a handler of the form
+                        // function (event) {...}, the model object can be accessed
+                        // using `event.target.model`.
+                        if (/^on/.test(k)) {
+                            e.addEventListener(k.substring(2), valOrFn);
+                        } else {
+                            // Invoke the given function to determine the value
+                            // of the attribute.
+                            var val = valOrFn(e.model, k);
+                            if (val) {
+                                e.setAttribute(k, val.toString());
+                            }
+                        }
+                }
+            } else if (valOrFn) {
+                // Normal value to be set.
+                switch (k) {
+                    case 'model':
+                        e.model = valOrFn;
+                        break;
+                    case 'style':
+                        processStyle(valOrFn, e);
+                        break;
+                    case 'classList':
+                        processClassList(valOrFn, e);
+                        break;
+                    default:
+                        // This is surely not a handler, since the
+                        // value supplied is not a function.
+                        e.setAttribute(k, valOrFn.toString());
                 }
             }
         }
     }
+    
     for (var i = 2; i < arguments.length; ++i) {
-        // We support plain strings. Just turn them into text nodes.
-        if (typeof arguments[i] === 'string') {
-            e.appendChild(document.createTextNode(arguments[i]));
-        } else {
-            e.appendChild(arguments[i]);
-        }
+        installContents(arguments[i], e);
     }
+    
     return e;
 };
 
@@ -101,6 +148,21 @@ var processClassList = function processClassList(classList, e) {
         } else {
             e.classList.remove(klass);
         }
+    }
+};
+
+var installContents = function installContents(contents, e) {
+    var contentsType = typeof contents;
+    if (contentsType === 'function') {
+        var child = contents(e.model);
+        if (typeof child === 'string') {
+            child = document.createTextNode(child);
+        }
+        e.appendChild(child);
+    } else if (contentsType === 'string') {
+        e.appendChild(document.createTextNode(contents));
+    } else if (contents) {
+        e.appendChild(contents);
     }
 };
 
