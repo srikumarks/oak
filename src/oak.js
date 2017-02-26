@@ -139,6 +139,32 @@ called "KeyedList" that we also support towards this.
 
 We expose the keyedList constructor out of the module.
 
+## v11
+
+Thus far, we've only paid attention to creation and updation of the DOM tree.
+We haven't said anything about how the model is to be updated as events pour in
+from the DOM tree. There is an easy way to manage this by introducing "commands"
+that invoke handlers via some kind of a dispatch mechanism.
+
+For our purposes, we can pretend that such a dispatch occus via a 
+function (message, arguments...) {} kind of function. So an event handler
+can be created like this - 
+
+    onclick: function (event) { cmd("IncrementCounter", 1); }
+
+The only thing we propose as part of this protocol is that the first argument
+be a string identifying the command. The arguments to be command can be 
+derived from the event. In order to make this simpler, we introduce a 
+"handler" function which creates such handlers given a cmd and an instruction string.
+
+function make(cmd) {
+    return tag("div", 
+                { style: { fontFamily: "sans-serif",
+                           fontSize: "24pt" } },
+                tag("div", {}, function (model) { return model.msg; }),
+                tag("button", { onclick: handler(cmd, "clicked") }, "Click me!"));
+}
+
 */
 var tag = function tag(name, attrs) {
 
@@ -458,10 +484,6 @@ var KeyedList = function KeyedList(dataFn, mapper, keyFn) {
     this.key = keyFn || indexKeyFn;
 };
 
-var isKeyedList = function isKeyedList(contents) {
-    return (contents instanceof KeyedList);
-};
-
 var indexKeyFn = function indexKeyFn(d, i) {
     return i;
 };
@@ -569,7 +591,27 @@ var installObjectKeyedList = function installObjectKeyedList(spec, e) {
     e.dyno.push(update);
 };
 
+// Turns a command dispatcher into an event handler for DOM nodes.
+// The "this" within the command dispatcher is set to the event so
+// that more parameters can be taken from the event if necessary.
+var handler = function handler(cmd, cmdName) {
+    var args = Array.prototype.slice.call(arguments);
+    args.shift();
+    return function (event) {
+        return cmd.apply(event, args);
+    };
+};
+
+// Convenience function to drill down into model objects.
+var field = function field(name) {
+    return function (object) {
+        return object[name];
+    };
+};
+
 mod.tag = tag;
 mod.bless = bless;
 mod.keyedList = keyedList;
+mod.handler = handler;
+mod.field = field;
 
