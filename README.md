@@ -13,6 +13,6 @@ to the HTML that it produces and, more importantly, maintains.
 - Includes a "by copy" implementation of immutable structs.
 - Inspired by [Elm], but in plain JS.
 
-[TodoMVC example]: https://cdn.rawgit.com/srikumarks/oak/65e4d0c4/examples/todo/main.html
+[TodoMVC example]: https://cdn.rawgit.com/srikumarks/oak/09181993/examples/todo/main.html
 [TodoMVC source]: https://github.com/srikumarks/oak/blob/master/examples/todo/todo.js
 [Elm]: https://elm-lang.org
