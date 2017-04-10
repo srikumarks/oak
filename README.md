@@ -1,6 +1,6 @@
 # oak
 
-A toy js framework for instructional purposes.
+A React-like js framework using model-diffing instead of DOM-diffing, for instructional purposes.
 
 If you follow the sequence of commit and the commit messages, you can
 follow the evolution of the "framework" as a series of choices made
